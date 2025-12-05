@@ -27,7 +27,6 @@ Ideal for:
 | `blur_examples.py`        | Gaussian, Median, and Bilateral blur               |
 | `edge_detection.py`       | Canny edge detection (simple)                      |
 
-*(More examples added regularly)*
 
 ## How to Run
 
