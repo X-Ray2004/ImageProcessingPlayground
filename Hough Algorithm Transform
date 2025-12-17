@@ -1,0 +1,213 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import ndimage
+
+# ============================================
+# 1. EDGE DETECTION FUNCTIONS
+# ============================================
+
+def sobel_edge_detection(image):
+    if len(image.shape) == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    sobel_x = np.array([[-1, 0, 1],
+                        [-2, 0, 2],
+                        [-1, 0, 1]])
+    
+    sobel_y = np.array([[-1, -2, -1],
+                        [0, 0, 0],
+                        [1, 2, 1]])
+    
+    grad_x = ndimage.convolve(image.astype(float), sobel_x)
+    grad_y = ndimage.convolve(image.astype(float), sobel_y)
+    
+    gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+    gradient_magnitude = (gradient_magnitude / gradient_magnitude.max() * 255).astype(np.uint8)
+    
+    return gradient_magnitude
+
+def prewitt_edge_detection(image):
+    if len(image.shape) == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    prewitt_x = np.array([[-1, 0, 1],
+                          [-1, 0, 1],
+                          [-1, 0, 1]])
+    
+    prewitt_y = np.array([[-1, -1, -1],
+                          [0, 0, 0],
+                          [1, 1, 1]])
+    
+    grad_x = ndimage.convolve(image.astype(float), prewitt_x)
+    grad_y = ndimage.convolve(image.astype(float), prewitt_y)
+    
+    gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+    gradient_magnitude = (gradient_magnitude / gradient_magnitude.max() * 255).astype(np.uint8)
+    
+    return gradient_magnitude
+
+# ============================================
+# 2. BINARIZATION FUNCTION
+# ============================================
+
+def binarize_image(image, threshold=127):
+    binary = np.zeros_like(image)
+    binary[image > threshold] = 255
+    return binary
+
+# ============================================
+# 3. HOUGH TRANSFORM FOR LINE DETECTION
+# ============================================
+
+def hough_transform(binary_image):
+   
+    height, width = binary_image.shape
+    
+    diag_len = int(np.sqrt(height**2 + width**2))
+    
+    thetas = np.deg2rad(np.arange(-90, 90, 1))
+    
+    rhos = np.linspace(-diag_len, diag_len, 2 * diag_len)
+    
+    accumulator = np.zeros((len(rhos), len(thetas)), dtype=np.uint64)
+    
+    y_idxs, x_idxs = np.nonzero(binary_image)
+    
+    for x, y in zip(x_idxs, y_idxs):
+        for theta_idx, theta in enumerate(thetas):
+            rho = x * np.cos(theta) + y * np.sin(theta)
+            
+            rho_idx = np.argmin(np.abs(rhos - rho))
+            
+            accumulator[rho_idx, theta_idx] += 1
+    
+    return accumulator, thetas, rhos
+
+def detect_lines(accumulator, thetas, rhos, threshold=100, num_lines=10):
+    """
+    Extract lines from Hough accumulator
+    Returns: list of (rho, theta) pairs
+    """
+    lines = []
+    
+    acc_copy = accumulator.copy()
+    
+    for _ in range(num_lines):
+        idx = np.argmax(acc_copy)
+        rho_idx, theta_idx = np.unravel_index(idx, acc_copy.shape)
+        
+        if acc_copy[rho_idx, theta_idx] < threshold:
+            break
+        
+        rho = rhos[rho_idx]
+        theta = thetas[theta_idx]
+        lines.append((rho, theta))
+        
+        rho_start = max(0, rho_idx - 10)
+        rho_end = min(len(rhos), rho_idx + 10)
+        theta_start = max(0, theta_idx - 5)
+        theta_end = min(len(thetas), theta_idx + 5)
+        
+        acc_copy[rho_start:rho_end, theta_start:theta_end] = 0
+    
+    return lines
+
+# ============================================
+# 4. DRAW LINES ON ORIGINAL IMAGE
+# ============================================
+
+def draw_lines_on_image(image, lines):
+    """
+    Draw detected lines on the original image
+    """
+    if len(image.shape) == 2:
+        result = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    else:
+        result = image.copy()
+    
+    for rho, theta in lines:
+        a = np.cos(theta)
+        b = np.sin(theta)
+        x0 = a * rho
+        y0 = b * rho
+        
+        x1 = int(x0 + 2000 * (-b))
+        y1 = int(y0 + 2000 * (a))
+        x2 = int(x0 - 2000 * (-b))
+        y2 = int(y0 - 2000 * (a))
+        
+        cv2.line(result, (x1, y1), (x2, y2), (0, 0, 255), 2)
+    
+    return result
+
+# ============================================
+# 5. MAIN PIPELINE
+# ============================================
+
+def main():
+    image = cv2.imread('jellyfish.jpg')
+    
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
+    print("Step 1: Applying edge detection...")
+    sobel_edges = sobel_edge_detection(image)
+    prewitt_edges = prewitt_edge_detection(image)
+    
+    print("Step 2: Applying binarization...")
+    binary_sobel = binarize_image(sobel_edges, threshold=50)
+    binary_prewitt = binarize_image(prewitt_edges, threshold=50)
+    
+    print("Step 3: Computing Hough Transform...")
+    accumulator, thetas, rhos = hough_transform(binary_sobel)
+    
+    print("Step 4: Detecting lines...")
+    lines = detect_lines(accumulator, thetas, rhos, threshold=80, num_lines=15)
+    print(f"Detected {len(lines)} lines")
+    
+    print("Step 5: Drawing lines on original image...")
+    result_image = draw_lines_on_image(image, lines)
+    result_image_rgb = cv2.cvtColor(result_image, cv2.COLOR_BGR2RGB)
+    
+    fig, axes = plt.subplots(2, 4, figsize=(12, 6))
+    
+    axes[0, 0].imshow(image_rgb)
+    axes[0, 0].set_title('Original Image')
+    axes[0, 0].axis('off')
+    
+    
+    axes[0, 1].imshow(sobel_edges, cmap='gray')
+    axes[0, 1].set_title('Sobel Edge Detection')
+    axes[0, 1].axis('off')
+    
+    axes[0, 2].imshow(prewitt_edges, cmap='gray')
+    axes[0, 2].set_title('Prewitt Edge Detection')
+    axes[0, 2].axis('off')
+    
+    axes[0, 3].imshow(binary_sobel, cmap='gray')
+    axes[0, 3].set_title('Binarized (Sobel)')
+    axes[0, 3].axis('off')
+    
+    axes[1, 0].imshow(binary_prewitt, cmap='gray')
+    axes[1, 0].set_title('Binarized (Prewitt)')
+    axes[1, 0].axis('off')
+    
+    axes[1, 1].imshow(np.log(accumulator + 1), cmap='hot')
+    axes[1, 1].set_title('Hough Accumulator (log scale)')
+    axes[1, 1].set_xlabel('Theta (degrees)')
+    axes[1, 1].set_ylabel('Rho (pixels)')
+    
+    axes[1, 2].imshow(result_image_rgb)
+    axes[1, 2].set_title('Detected Lines on Original')
+    axes[1, 2].axis('off')
+    
+    # Show comparison
+    axes[1, 3].imshow(image_rgb)
+    axes[1, 3].set_title('Original (RGB)')
+    axes[1, 3].axis('off')
+    
+    plt.tight_layout()
+    plt.show()
+
+if __name__ == "__main__":
+    main()
